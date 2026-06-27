@@ -1,0 +1,12 @@
+{
+  "name": "docker-fl-preview",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build:image": "iot build start --push --no-deploy",
+    "build:image-force": "iot build start --bump-version --push --recreate --follow --read-env --sync-secrets"
+  },
+  "devDependencies": {
+    "@gormantec/iot-cli": "^1.0.19"
+  }
+}
