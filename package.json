@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "build:image": "iot build start --push --no-deploy",
-    "build:image-force": "iot build start --bump-version --push --recreate --follow --read-env --sync-secrets"
+    "build:image-force": "iot build start --bump-version --push --recreate --follow --read-env --sync-secrets",
+    "build:push": "docker build -t ghcr.io/gormantec/docker-fl-preview:latest . && docker push ghcr.io/gormantec/docker-fl-preview:latest"
   },
   "devDependencies": {
     "@gormantec/iot-cli": "^1.0.19"
