@@ -2,15 +2,17 @@
 # start-preview.sh — Boot script for per-user Flutter preview container
 #
 # Mounted volume: /workspace (NAS per-user dir, shared with designer container)
-# The designer writes main.dart, screens/, etc. to /workspace
+# The designer writes main.dart, screens/, etc. to /workspace/{PREVIEW_USER_HASH}
 # Flutter watches these files and hot-reloads on change
 
 set -e
 
-WORKSPACE=/workspace
 PORT=${PORT:-8080}
+USER_HASH=${PREVIEW_USER_HASH:-default}
+WORKSPACE=/workspace/$USER_HASH/current
 
 echo "[fl-preview] Starting Flutter preview on port $PORT"
+echo "[fl-preview] User hash: $USER_HASH"
 echo "[fl-preview] Workspace: $WORKSPACE"
 
 # Ensure workspace exists
