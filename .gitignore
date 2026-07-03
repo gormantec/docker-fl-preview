@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+ui/dist/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+/data/
+
+# Logs
+*.log
+npm-debug.log*
+tests/test-report.md
+tests/results.json
