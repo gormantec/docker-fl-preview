@@ -2,21 +2,40 @@
 # start-preview.sh — Boot script for per-user Flutter preview container
 #
 # Mounted volume: /workspace (NAS per-user dir, shared with designer container)
-# The designer writes main.dart, screens/, etc. to /workspace/{PREVIEW_USER_HASH}
-# Flutter watches these files and hot-reloads on change
+# The designer writes main.dart, screens/, etc. to /workspace/{PREVIEW_USER_HASH}/current/
+# Flutter watches these files and hot-reloads on change.
+#
+# Self-healing features:
+#   1. Watches pubspec.yaml → auto-runs flutter pub get on changes
+#   2. Watches commands/ dir → executes .sh scripts (for agent-driven fixes)
+#   3. Writes all Flutter output to logs/preview.log on NAS for agent monitoring
 
 set -e
 
 PORT=${PORT:-8080}
 USER_HASH=${PREVIEW_USER_HASH:-default}
 WORKSPACE=/workspace/$USER_HASH/current
+LOGDIR=/workspace/$USER_HASH/logs
+CMDDIR=/workspace/$USER_HASH/commands
+CMDOUTDIR=/workspace/$USER_HASH/commands/output
 
 echo "[fl-preview] Starting Flutter preview on port $PORT"
 echo "[fl-preview] User hash: $USER_HASH"
 echo "[fl-preview] Workspace: $WORKSPACE"
 
-# Ensure workspace exists
-mkdir -p "$WORKSPACE"
+# Ensure directories exist
+mkdir -p "$WORKSPACE" "$LOGDIR" "$CMDDIR" "$CMDOUTDIR"
+
+# ── Helper: run flutter pub get with output to log ──
+run_pub_get() {
+  echo "[fl-preview] $(date -Iseconds) pubspec.yaml changed — running flutter pub get..." | tee -a "$LOGDIR/preview.log"
+  cd "$WORKSPACE"
+  if flutter pub get >> "$LOGDIR/preview.log" 2>&1; then
+    echo "[fl-preview] $(date -Iseconds) flutter pub get OK" | tee -a "$LOGDIR/preview.log"
+  else
+    echo "[fl-preview] $(date -Iseconds) flutter pub get FAILED (exit $?)" | tee -a "$LOGDIR/preview.log"
+  fi
+}
 
 # Create Flutter project if not already initialized
 if [ ! -f "$WORKSPACE/pubspec.yaml" ]; then
@@ -136,8 +155,61 @@ class HomeScreen extends StatelessWidget {
 DARTEOF
 fi
 
-echo "[fl-preview] Starting Flutter web-server..."
+# ═══════════════════════════════════════════════════════════════
+# BACKGROUND PROCESS 1: Watch pubspec.yaml → auto flutter pub get
+# Uses stat-based polling (no inotify-tools dependency)
+# ═══════════════════════════════════════════════════════════════
+(
+  echo "[fl-preview] pubspec.yaml watcher started (pid $$)"
+  pkg_file="$WORKSPACE/pubspec.yaml"
+  last_mtime=$(stat -c %Y "$pkg_file" 2>/dev/null || echo 0)
+  while true; do
+    sleep 3
+    curr_mtime=$(stat -c %Y "$pkg_file" 2>/dev/null || echo 0)
+    if [ "$curr_mtime" != "$last_mtime" ] && [ "$curr_mtime" != "0" ]; then
+      sleep 1  # debounce
+      run_pub_get
+      last_mtime=$curr_mtime
+    fi
+  done
+) &
+WATCHER_PID=$!
+
+# ═══════════════════════════════════════════════════════════════
+# BACKGROUND PROCESS 2: Watch commands/ dir → exec .sh scripts
+# Uses polling (no inotify-tools dependency)
+# ═══════════════════════════════════════════════════════════════
+(
+  echo "[fl-preview] command executor started (pid $$)"
+  while true; do
+    sleep 2
+    for script in "$CMDDIR"/*.sh; do
+      [ -f "$script" ] || continue
+      script_name=$(basename "$script")
+      OUTFILE="$CMDOUTDIR/${script_name%.sh}.out"
+      echo "[fl-preview] $(date -Iseconds) Executing: $script_name" | tee -a "$LOGDIR/preview.log"
+      chmod +x "$script"
+      cd "$WORKSPACE"
+      if bash "$script" > "$OUTFILE" 2>&1; then
+        echo "[fl-preview] $(date -Iseconds) $script_name OK (exit 0)" | tee -a "$LOGDIR/preview.log"
+        echo "EXIT_CODE=0" >> "$OUTFILE"
+      else
+        rc=$?
+        echo "[fl-preview] $(date -Iseconds) $script_name FAILED (exit $rc)" | tee -a "$LOGDIR/preview.log"
+        echo "EXIT_CODE=$rc" >> "$OUTFILE"
+      fi
+      mkdir -p "$CMDDIR/archive"
+      mv "$script" "$CMDDIR/archive/${script_name}.$(date +%s).done"
+    done
+  done
+) &
+CMDEXEC_PID=$!
+
+# ═══════════════════════════════════════════════════════════════
+# MAIN PROCESS: Flutter web-server → logs to NAS + Docker stdout
+# ═══════════════════════════════════════════════════════════════
+echo "[fl-preview] Starting Flutter web-server (logs → $LOGDIR/preview.log)..."
 cd "$WORKSPACE"
 
-# Start Flutter web dev server — hot-reloads on file changes
-exec flutter run -d web-server --web-port "$PORT" --web-hostname 0.0.0.0
+# Run Flutter, tee output to both Docker stdout and NAS log file
+exec flutter run -d web-server --web-port "$PORT" --web-hostname 0.0.0.0 2>&1 | tee -a "$LOGDIR/preview.log"
