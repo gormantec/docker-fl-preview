@@ -9,8 +9,7 @@
 #   1. Watches pubspec.yaml → auto-runs flutter pub get on changes
 #   2. Watches commands/ dir → executes .sh scripts (for agent-driven fixes)
 #   3. Writes all Flutter output to logs/preview.log on NAS for agent monitoring
-
-set -e
+#   4. Crash loop detection — prevents infinite restart cycles
 
 PORT=${PORT:-8080}
 USER_HASH=${PREVIEW_USER_HASH:-default}
@@ -18,6 +17,7 @@ WORKSPACE=/workspace/$USER_HASH/current
 LOGDIR=/workspace/$USER_HASH/logs
 CMDDIR=/workspace/$USER_HASH/commands
 CMDOUTDIR=/workspace/$USER_HASH/commands/output
+CRASH_FILE=/workspace/$USER_HASH/.crash-state
 
 echo "[fl-preview] Starting Flutter preview on port $PORT"
 echo "[fl-preview] User hash: $USER_HASH"
@@ -25,6 +25,46 @@ echo "[fl-preview] Workspace: $WORKSPACE"
 
 # Ensure directories exist
 mkdir -p "$WORKSPACE" "$LOGDIR" "$CMDDIR" "$CMDOUTDIR"
+
+# ═══════════════════════════════════════════════════════════════
+# CRASH LOOP DETECTION — prevent infinite restart cycles
+# ═══════════════════════════════════════════════════════════════
+CRASH_WINDOW_SEC=300
+MAX_CRASHES=5
+
+now=$(date +%s)
+crash_count=0
+crash_first=0
+
+if [ -f "$CRASH_FILE" ]; then
+  read -r crash_first crash_count < "$CRASH_FILE" 2>/dev/null || true
+fi
+
+if [ "$crash_first" -gt 0 ] && [ $((now - crash_first)) -lt $CRASH_WINDOW_SEC ]; then
+  crash_count=$((crash_count + 1))
+else
+  crash_first=$now
+  crash_count=1
+fi
+
+echo "$crash_first $crash_count" > "$CRASH_FILE"
+
+if [ "$crash_count" -gt "$MAX_CRASHES" ]; then
+  echo "[fl-preview] ❌ CRASH LOOP DETECTED: $crash_count crashes in $(( (now - crash_first) / 60 ))min" | tee -a "$LOGDIR/preview.log"
+  cat >> "$LOGDIR/preview.log" << SOSEOF
+╔══════════════════════════════════════════════════════════════╗
+║  SOS: Preview container crash loop detected!               ║
+║  User: $USER_HASH                                          ║
+║  Crashes: $crash_count in $(( (now - crash_first) / 60 ))min                         ║
+║  Time: $(date -Iseconds)                                   ║
+║  Delete $CRASH_FILE to allow restart.                      ║
+╚══════════════════════════════════════════════════════════════╝
+SOSEOF
+  sleep 120
+  exit 1
+fi
+
+echo "[fl-preview] Crash count: $crash_count/$MAX_CRASHES in window" | tee -a "$LOGDIR/preview.log"
 
 # ── Helper: run flutter pub get with output to log ──
 run_pub_get() {

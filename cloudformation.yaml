@@ -1,0 +1,8 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Flutter Preview — Per-user Flutter live preview container (no stack resources, Docker-only)'
+# Preview containers are created dynamically by the preview orchestrator.
+# This CFN template exists only to satisfy the build pipeline.
+# No AWS resources are provisioned — the Docker image is deployed via ECS/Swarm.
+Resources:
+  NullResource:
+    Type: AWS::CloudFormation::WaitConditionHandle
