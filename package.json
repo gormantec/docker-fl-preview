@@ -8,6 +8,6 @@
     "build:push": "docker build -t ghcr.io/gormantec/docker-fl-preview:latest . && docker push ghcr.io/gormantec/docker-fl-preview:latest"
   },
   "devDependencies": {
-    "@gormantec/iot-cli": "^1.0.19"
+    "@gormantec/iot-cli": "^1.0.22"
   }
 }
