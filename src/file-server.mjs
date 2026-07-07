@@ -288,6 +288,11 @@ function parseBody(req) {
 function bufferBody(req) {
   return new Promise((resolve) => {
     if (req._body !== undefined) return resolve();
+    // If stream already ended, body is empty or already consumed
+    if (req.readableEnded || req.complete) {
+      req._body = '';
+      return resolve();
+    }
     req.pause();
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
